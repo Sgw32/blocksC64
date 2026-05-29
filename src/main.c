@@ -4,14 +4,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define WORLD_W 32
-#define WORLD_H 16
-#define VIEW_W 30
-#define VIEW_H 16
+#define WORLD_X 16
+#define WORLD_Y 8
+#define WORLD_Z 16
+#define SCREEN_W 30
+#define SCREEN_H 16
 #define INV_SLOTS 15
 #define HOTBAR_SLOTS 5
 #define MAX_HEALTH 8
-#define RANDOM_TICKS_PER_FRAME 3
+#define RANDOM_TICKS_PER_FRAME 4
+#define RAYCAST_MAX_LENGTH 0x40
+#define PLAYER_HALF_WIDTH 5
+#define PLAYER_CAM_HEIGHT 24
+#define BLOCK_SIZE 16
 
 //#define COLOR_RAM 0xd800
 #define BORDER_COLOR 0xd020
@@ -53,6 +58,19 @@ enum ItemId {
     ITEM_IRONINGOT = 0xD0,
     ITEM_APPLE = 0xE0,
     ITEM_NONSTACKABLE = 0xF0,
+    ITEM_WOODPICKAXE = 0xF0,
+    ITEM_WOODAXE = 0xF1,
+    ITEM_WOODSHOVEL = 0xF2,
+    ITEM_WOODSWORD = 0xF3,
+    ITEM_STONEPICKAXE = 0xF4,
+    ITEM_STONEAXE = 0xF5,
+    ITEM_STONESHOVEL = 0xF6,
+    ITEM_STONESWORD = 0xF7,
+    ITEM_IRONPICKAXE = 0xF8,
+    ITEM_IRONAXE = 0xF9,
+    ITEM_IRONSHOVEL = 0xFA,
+    ITEM_IRONSWORD = 0xFB,
+    ITEM_SHEARS = 0xFC,
     ITEM_TABLE = 0xFD,
     ITEM_FURNACE = 0xFE,
     ITEM_CHEST = 0xFF
@@ -74,17 +92,40 @@ enum BlockType {
     BLOCKTYPE_SAPLING = 5
 };
 
-static uint8_t world[WORLD_H][WORLD_W];
+typedef struct RayHit {
+    uint8_t hit;
+    uint8_t block;
+    uint8_t x;
+    uint8_t y;
+    uint8_t z;
+    uint8_t prev_x;
+    uint8_t prev_y;
+    uint8_t prev_z;
+    uint8_t dist;
+} RayHit;
+
+static uint8_t world[WORLD_Y][WORLD_Z][WORLD_X];
 static uint8_t inventory[INV_SLOTS];
 static uint8_t selected_slot;
 static uint8_t player_x;
 static uint8_t player_y;
-static int8_t target_dx;
-static int8_t target_dy;
+static uint8_t player_z;
+static uint8_t yaw;
+static int8_t pitch;
 static uint8_t health;
 static uint8_t logs_in_world;
 static uint8_t message_timer;
 static char message[32];
+
+static const int8_t sin16[16] = {
+    0, 6, 11, 15, 16, 15, 11, 6,
+    0, -6, -11, -15, -16, -15, -11, -6
+};
+
+static const int8_t cos16[16] = {
+    16, 15, 11, 6, 0, -6, -11, -15,
+    -16, -15, -11, -6, 0, 6, 11, 15
+};
 
 static const char item_name_initial[16] = {
     '.', 's', 'd', 'S', 'c', 'l', 'v', 'p',
@@ -106,9 +147,25 @@ static uint8_t rnd(uint8_t limit)
     return (uint8_t)(rand() % limit);
 }
 
-static uint8_t in_bounds(int8_t x, int8_t y)
+static uint8_t in_bounds(int8_t x, int8_t y, int8_t z)
 {
-    return x >= 0 && y >= 0 && x < WORLD_W && y < WORLD_H;
+    return x >= 0 && y >= 0 && z >= 0 &&
+           x < WORLD_X && y < WORLD_Y && z < WORLD_Z;
+}
+
+static uint8_t get_block(int8_t x, int8_t y, int8_t z)
+{
+    if (!in_bounds(x, y, z)) {
+        return BLOCK_STONE;
+    }
+    return world[(uint8_t)y][(uint8_t)z][(uint8_t)x];
+}
+
+static void set_block(int8_t x, int8_t y, int8_t z, uint8_t block)
+{
+    if (in_bounds(x, y, z)) {
+        world[(uint8_t)y][(uint8_t)z][(uint8_t)x] = block;
+    }
 }
 
 static uint8_t item_count(uint8_t item)
@@ -150,8 +207,6 @@ static uint8_t block_to_item(uint8_t block)
             return ITEM_IRONORE | 1;
         case BLOCK_SAND:
             return ITEM_SAND | 1;
-        case BLOCK_GLASS:
-            return ITEM_AIR;
         case BLOCK_SAPLING:
             return ITEM_SAPLING | 1;
         case BLOCK_TABLE:
@@ -166,16 +221,16 @@ static uint8_t block_to_item(uint8_t block)
 
 static uint8_t item_to_block(uint8_t item)
 {
-    if (item >= ITEM_TABLE) {
-        if (item == ITEM_TABLE) {
-            return BLOCK_TABLE;
-        }
-        if (item == ITEM_FURNACE) {
-            return BLOCK_FURNACE;
-        }
-        if (item == ITEM_CHEST) {
-            return BLOCK_CHEST;
-        }
+    if (item == ITEM_TABLE) {
+        return BLOCK_TABLE;
+    }
+    if (item == ITEM_FURNACE) {
+        return BLOCK_FURNACE;
+    }
+    if (item == ITEM_CHEST) {
+        return BLOCK_CHEST;
+    }
+    if (item >= ITEM_NONSTACKABLE) {
         return BLOCK_AIR;
     }
 
@@ -235,6 +290,7 @@ static uint8_t get_block_hardness(uint8_t block)
         case BLOCK_SAND:
         case BLOCK_DIRT:
         case BLOCK_GRASS:
+        case BLOCK_SAPLING:
             return 0;
         case BLOCK_GLASS:
         case BLOCK_PLANK:
@@ -257,10 +313,10 @@ static uint8_t tool_strength_for(uint8_t item, uint8_t block)
     uint8_t tier;
     uint8_t type;
 
-    if (item < ITEM_NONSTACKABLE || item > 0xfc) {
+    if (item < ITEM_NONSTACKABLE || item > ITEM_SHEARS) {
         return 4;
     }
-    if (item == 0xfc && block == BLOCK_LEAVES) {
+    if (item == ITEM_SHEARS && block == BLOCK_LEAVES) {
         return 7;
     }
 
@@ -292,7 +348,7 @@ static uint8_t add_item(uint8_t item)
 
     if (item < ITEM_NONSTACKABLE) {
         for (i = 0; i < INV_SLOTS; ++i) {
-            if (item_kind(inventory[i]) == kind && inventory[i] != ITEM_AIR) {
+            if (inventory[i] != ITEM_AIR && item_kind(inventory[i]) == kind) {
                 sum = item_count(inventory[i]) + count;
                 if (sum <= 15) {
                     inventory[i] = kind | sum;
@@ -333,11 +389,21 @@ static void remove_one_from_slot(uint8_t slot)
     }
 }
 
-static char block_char(uint8_t block)
+static uint8_t can_walk(uint8_t block)
 {
+    return block == BLOCK_AIR || block == BLOCK_SAPLING || block == BLOCK_LEAVES;
+}
+
+static char block_char(uint8_t block, uint8_t dist)
+{
+    if (dist > 48) {
+        return '.';
+    }
+    if (dist > 32) {
+        return ':';
+    }
+
     switch (block) {
-        case BLOCK_AIR:
-            return ' ';
         case BLOCK_GRASS:
             return 102;
         case BLOCK_DIRT:
@@ -369,11 +435,14 @@ static char block_char(uint8_t block)
         case BLOCK_CHEST:
             return 'C';
     }
-    return '?';
+    return ' ';
 }
 
-static uint8_t block_color(uint8_t block)
+static uint8_t block_color(uint8_t block, uint8_t dist)
 {
+    if (dist > 48) {
+        return COLOR_GRAY1;
+    }
     switch (block) {
         case BLOCK_GRASS:
         case BLOCK_LEAVES:
@@ -408,44 +477,99 @@ static void put_colored(uint8_t x, uint8_t y, char ch, uint8_t color)
     cputc(ch);
 }
 
+static void raycast(uint8_t angle, int8_t ray_pitch, RayHit *hit)
+{
+    int16_t rx;
+    int16_t ry;
+    int16_t rz;
+    int16_t dx;
+    int16_t dy;
+    int16_t dz;
+    uint8_t dist;
+    int8_t bx;
+    int8_t by;
+    int8_t bz;
+
+    rx = (int16_t)player_x + PLAYER_HALF_WIDTH;
+    ry = (int16_t)player_y + PLAYER_CAM_HEIGHT;
+    rz = (int16_t)player_z + PLAYER_HALF_WIDTH;
+
+    dx = sin16[angle & 0x0f];
+    dz = cos16[angle & 0x0f];
+    dy = ray_pitch;
+
+    hit->hit = 0;
+    hit->block = BLOCK_AIR;
+    hit->x = (uint8_t)(rx >> 4);
+    hit->y = (uint8_t)(ry >> 4);
+    hit->z = (uint8_t)(rz >> 4);
+    hit->prev_x = hit->x;
+    hit->prev_y = hit->y;
+    hit->prev_z = hit->z;
+    hit->dist = RAYCAST_MAX_LENGTH;
+
+    for (dist = 1; dist <= RAYCAST_MAX_LENGTH; ++dist) {
+        rx += dx;
+        ry += dy;
+        rz += dz;
+
+        bx = (int8_t)(rx >> 4);
+        by = (int8_t)(ry >> 4);
+        bz = (int8_t)(rz >> 4);
+
+        if (!in_bounds(bx, by, bz)) {
+            hit->hit = 1;
+            hit->block = BLOCK_STONE;
+            hit->x = (uint8_t)bx;
+            hit->y = (uint8_t)by;
+            hit->z = (uint8_t)bz;
+            hit->dist = dist;
+            return;
+        }
+
+        hit->prev_x = hit->x;
+        hit->prev_y = hit->y;
+        hit->prev_z = hit->z;
+        hit->x = (uint8_t)bx;
+        hit->y = (uint8_t)by;
+        hit->z = (uint8_t)bz;
+        hit->block = get_block(bx, by, bz);
+
+        if (hit->block != BLOCK_AIR) {
+            hit->hit = 1;
+            hit->dist = dist;
+            return;
+        }
+    }
+}
+
 static void draw_world(void)
 {
-    uint8_t x;
-    uint8_t y;
-    int8_t wx;
-    int8_t wy;
-    int8_t sx;
-    int8_t sy;
+    uint8_t sx;
+    uint8_t sy;
+    uint8_t angle;
+    int8_t ray_pitch;
+    RayHit hit;
 
-    sx = (int8_t)player_x - VIEW_W / 2;
-    sy = (int8_t)player_y - VIEW_H / 2;
-
-    for (y = 0; y < VIEW_H; ++y) {
-        for (x = 0; x < VIEW_W; ++x) {
-            wx = sx + x;
-            wy = sy + y;
-            if (!in_bounds(wx, wy)) {
-                put_colored(x, y, ' ', COLOR_BLACK);
+    for (sy = 0; sy < SCREEN_H; ++sy) {
+        for (sx = 0; sx < SCREEN_W; ++sx) {
+            angle = (uint8_t)(yaw + ((int8_t)sx - (SCREEN_W / 2)) / 4);
+            ray_pitch = (int8_t)(((SCREEN_H / 2) - (int8_t)sy) + pitch);
+            raycast(angle, ray_pitch, &hit);
+            if (hit.hit) {
+                put_colored(sx, sy, block_char(hit.block, hit.dist),
+                            block_color(hit.block, hit.dist));
+            } else if (sy < SCREEN_H / 2) {
+                put_colored(sx, sy, ' ', COLOR_LIGHTBLUE);
             } else {
-                put_colored(x, y, block_char(world[(uint8_t)wy][(uint8_t)wx]),
-                            block_color(world[(uint8_t)wy][(uint8_t)wx]));
+                put_colored(sx, sy, '.', COLOR_GRAY1);
             }
         }
     }
 
-    put_colored(VIEW_W / 2, VIEW_H / 2, '@', COLOR_WHITE);
-
-    wx = (int8_t)player_x + target_dx;
-    wy = (int8_t)player_y + target_dy;
-    if (in_bounds(wx, wy)) {
-        x = (uint8_t)(wx - sx);
-        y = (uint8_t)(wy - sy);
-        if (x < VIEW_W && y < VIEW_H) {
-            revers(1);
-            put_colored(x, y, block_char(world[(uint8_t)wy][(uint8_t)wx]), COLOR_WHITE);
-            revers(0);
-        }
-    }
+    revers(1);
+    put_colored(SCREEN_W / 2, SCREEN_H / 2, '+', COLOR_WHITE);
+    revers(0);
 }
 
 static void draw_hud(void)
@@ -472,13 +596,13 @@ static void draw_hud(void)
     }
 
     gotoxy(31, 11);
-    cputs("WASD");
+    cputs("W/S");
     gotoxy(31, 12);
-    cputs("IJKL");
+    cputs("A/D");
     gotoxy(31, 13);
-    cputs("SPC");
+    cputs("I/K");
     gotoxy(31, 14);
-    cputs("RET");
+    cputs("SPC");
 
     gotoxy(0, 22);
     textcolor(COLOR_LIGHTBLUE);
@@ -496,46 +620,37 @@ static void render(void)
     draw_hud();
 }
 
-static void generate_tree(uint8_t x, uint8_t y)
+static void generate_tree(uint8_t x, uint8_t y, uint8_t z)
 {
     int8_t dx;
-    int8_t dy;
-    uint8_t height;
-    uint8_t ly;
+    int8_t dz;
+    uint8_t i;
 
-    height = 3 + rnd(2);
-    if (y < height) {
-        return;
-    }
-
-    for (ly = 0; ly < height; ++ly) {
-        if (world[y - ly][x] == BLOCK_AIR || world[y - ly][x] == BLOCK_SAPLING) {
-            world[y - ly][x] = BLOCK_LOG;
+    for (i = 0; i < 4; ++i) {
+        if (y + i < WORLD_Y) {
+            set_block((int8_t)x, (int8_t)(y + i), (int8_t)z, BLOCK_LOG);
             ++logs_in_world;
         }
     }
 
-    for (dy = -2; dy <= 1; ++dy) {
-        for (dx = -2; dx <= 2; ++dx) {
-            if (abs(dx) + abs(dy) < 4 &&
-                in_bounds((int8_t)x + dx, (int8_t)y - (int8_t)height + dy)) {
-                if (world[y - height + dy][x + dx] == BLOCK_AIR) {
-                    world[y - height + dy][x + dx] = BLOCK_LEAVES;
-                }
+    for (dx = -2; dx <= 2; ++dx) {
+        for (dz = -2; dz <= 2; ++dz) {
+            if (abs(dx) + abs(dz) < 4) {
+                set_block((int8_t)x + dx, (int8_t)y + 4, (int8_t)z + dz, BLOCK_LEAVES);
+                set_block((int8_t)x + dx, (int8_t)y + 5, (int8_t)z + dz, BLOCK_LEAVES);
             }
         }
     }
 }
 
-static uint8_t has_adjacent_grass(uint8_t x, uint8_t y)
+static uint8_t has_adjacent_grass(uint8_t x, uint8_t y, uint8_t z)
 {
     int8_t dx;
-    int8_t dy;
+    int8_t dz;
 
-    for (dy = -1; dy <= 1; ++dy) {
-        for (dx = -1; dx <= 1; ++dx) {
-            if (in_bounds((int8_t)x + dx, (int8_t)y + dy) &&
-                world[y + dy][x + dx] == BLOCK_GRASS) {
+    for (dx = -1; dx <= 1; ++dx) {
+        for (dz = -1; dz <= 1; ++dz) {
+            if (get_block((int8_t)x + dx, (int8_t)y, (int8_t)z + dz) == BLOCK_GRASS) {
                 return 1;
             }
         }
@@ -548,19 +663,23 @@ static void random_tick(void)
     uint8_t i;
     uint8_t x;
     uint8_t y;
+    uint8_t z;
     uint8_t b;
 
     for (i = 0; i < RANDOM_TICKS_PER_FRAME; ++i) {
-        x = rnd(WORLD_W);
-        y = rnd(WORLD_H);
-        b = world[y][x];
+        x = rnd(WORLD_X);
+        y = rnd(WORLD_Y);
+        z = rnd(WORLD_Z);
+        b = world[y][z][x];
 
-        if (b == BLOCK_DIRT && has_adjacent_grass(x, y) && rnd(4) == 0) {
-            world[y][x] = BLOCK_GRASS;
-        } else if (b == BLOCK_GRASS && y > 0 && world[y - 1][x] != BLOCK_AIR) {
-            world[y][x] = BLOCK_DIRT;
+        if (b == BLOCK_DIRT && y + 1 < WORLD_Y &&
+            world[y + 1][z][x] == BLOCK_AIR && has_adjacent_grass(x, y, z)) {
+            world[y][z][x] = BLOCK_GRASS;
+        } else if (b == BLOCK_GRASS && y + 1 < WORLD_Y &&
+                   world[y + 1][z][x] != BLOCK_AIR) {
+            world[y][z][x] = BLOCK_DIRT;
         } else if (b == BLOCK_LEAVES && logs_in_world == 0 && rnd(5) == 0) {
-            world[y][x] = BLOCK_AIR;
+            world[y][z][x] = BLOCK_AIR;
             if (rnd(100) < 20) {
                 add_item(ITEM_STICK | 1);
             } else if (rnd(100) < 12) {
@@ -569,8 +688,8 @@ static void random_tick(void)
                 add_item(ITEM_APPLE | 1);
             }
         } else if (b == BLOCK_SAPLING && rnd(24) == 0) {
-            world[y][x] = BLOCK_AIR;
-            generate_tree(x, y);
+            world[y][z][x] = BLOCK_AIR;
+            generate_tree(x, y, z);
             set_msg("sapling grew");
         }
     }
@@ -580,30 +699,32 @@ static void init_world(void)
 {
     uint8_t x;
     uint8_t y;
+    uint8_t z;
 
     memset(world, BLOCK_AIR, sizeof(world));
     logs_in_world = 0;
 
-    for (y = 10; y < WORLD_H; ++y) {
-        for (x = 0; x < WORLD_W; ++x) {
-            world[y][x] = (y == 10) ? BLOCK_GRASS : BLOCK_DIRT;
+    for (z = 0; z < WORLD_Z; ++z) {
+        for (x = 0; x < WORLD_X; ++x) {
+            world[0][z][x] = BLOCK_STONE;
+            world[1][z][x] = BLOCK_DIRT;
+            world[2][z][x] = BLOCK_GRASS;
         }
     }
 
-    for (x = 3; x < 9; ++x) {
-        world[12][x] = BLOCK_STONE;
+    for (y = 2; y < 5; ++y) {
+        world[y][4][4] = BLOCK_STONE;
+        world[y][4][5] = BLOCK_COALORE;
+        world[y][8][11] = BLOCK_IRONORE;
     }
-    world[11][6] = BLOCK_COALORE;
-    world[11][7] = BLOCK_IRONORE;
 
-    generate_tree(20, 10);
-    generate_tree(25, 10);
-
-    world[10][13] = BLOCK_SAND;
-    world[9][14] = BLOCK_SAPLING;
-    world[10][16] = BLOCK_TABLE;
-    world[10][17] = BLOCK_FURNACE;
-    world[10][18] = BLOCK_CHEST;
+    generate_tree(11, 3, 5);
+    generate_tree(5, 3, 11);
+    world[3][8][8] = BLOCK_TABLE;
+    world[3][8][9] = BLOCK_FURNACE;
+    world[3][8][10] = BLOCK_CHEST;
+    world[3][10][8] = BLOCK_SAPLING;
+    world[3][10][9] = BLOCK_SAND;
 }
 
 static void init_player(void)
@@ -616,79 +737,79 @@ static void init_player(void)
     inventory[4] = ITEM_TABLE;
 
     selected_slot = 0;
-    player_x = 15;
-    player_y = 9;
-    target_dx = 0;
-    target_dy = 1;
+    player_x = 8 * BLOCK_SIZE;
+    player_y = 3 * BLOCK_SIZE;
+    player_z = 6 * BLOCK_SIZE;
+    yaw = 0;
+    pitch = 0;
     health = MAX_HEALTH;
-    set_msg("minecraft c64");
+    set_msg("3d petscii raycast");
 }
 
-static uint8_t can_walk(uint8_t block)
+static void try_move(int8_t forward, int8_t strafe)
 {
-    return block == BLOCK_AIR || block == BLOCK_SAPLING || block == BLOCK_LEAVES;
-}
+    int16_t nx;
+    int16_t nz;
+    int8_t block_x;
+    int8_t block_y;
+    int8_t block_z;
+    int8_t dx;
+    int8_t dz;
 
-static void try_move(int8_t dx, int8_t dy)
-{
-    int8_t nx;
-    int8_t ny;
+    dx = (int8_t)((cos16[yaw & 0x0f] * strafe - sin16[yaw & 0x0f] * forward) >> 3);
+    dz = (int8_t)((sin16[yaw & 0x0f] * strafe + cos16[yaw & 0x0f] * forward) >> 3);
+    nx = (int16_t)player_x + dx;
+    nz = (int16_t)player_z + dz;
 
-    nx = (int8_t)player_x + dx;
-    ny = (int8_t)player_y + dy;
-    target_dx = dx;
-    target_dy = dy;
+    block_x = (int8_t)((nx + PLAYER_HALF_WIDTH) >> 4);
+    block_y = (int8_t)(player_y >> 4);
+    block_z = (int8_t)((nz + PLAYER_HALF_WIDTH) >> 4);
 
-    if (dx == 0 && dy == 0) {
-        return;
-    }
-    if (in_bounds(nx, ny) && can_walk(world[(uint8_t)ny][(uint8_t)nx])) {
+    if (in_bounds(block_x, block_y, block_z) &&
+        can_walk(get_block(block_x, block_y, block_z)) &&
+        can_walk(get_block(block_x, (int8_t)(block_y + 1), block_z))) {
         player_x = (uint8_t)nx;
-        player_y = (uint8_t)ny;
+        player_z = (uint8_t)nz;
     }
 }
 
-static void set_target(int8_t dx, int8_t dy)
+static uint8_t center_ray(RayHit *hit)
 {
-    target_dx = dx;
-    target_dy = dy;
+    raycast(yaw, pitch, hit);
+    return hit->hit && hit->dist <= RAYCAST_MAX_LENGTH;
 }
 
 static void break_target(void)
 {
-    int8_t tx;
-    int8_t ty;
-    uint8_t block;
+    RayHit hit;
     uint8_t held;
     uint8_t strength;
     uint8_t hardness;
     uint8_t drop;
 
-    tx = (int8_t)player_x + target_dx;
-    ty = (int8_t)player_y + target_dy;
-    if (!in_bounds(tx, ty)) {
-        return;
-    }
-
-    block = world[(uint8_t)ty][(uint8_t)tx];
-    if (block == BLOCK_AIR) {
+    if (!center_ray(&hit) || hit.block == BLOCK_AIR ||
+        (hit.block == BLOCK_STONE &&
+         !in_bounds((int8_t)hit.x, (int8_t)hit.y, (int8_t)hit.z))) {
         return;
     }
 
     held = inventory[selected_slot];
-    strength = tool_strength_for(held, block);
-    hardness = get_block_hardness(block);
+    strength = tool_strength_for(held, hit.block);
+    hardness = get_block_hardness(hit.block);
     if (strength <= hardness) {
         set_msg("tool too weak");
         return;
     }
 
-    if (block == BLOCK_LOG && logs_in_world) {
+    if (hit.block == BLOCK_LOG && logs_in_world) {
         --logs_in_world;
     }
 
-    drop = block_to_item(block);
-    if (block == BLOCK_LEAVES && held != 0xfc) {
+    drop = block_to_item(hit.block);
+    if (hit.block == BLOCK_GLASS) {
+        drop = ITEM_AIR;
+    }
+    if (hit.block == BLOCK_LEAVES && held != ITEM_SHEARS) {
         drop = ITEM_AIR;
         if (rnd(100) < 20) {
             drop = ITEM_SAPLING | 1;
@@ -699,13 +820,9 @@ static void break_target(void)
         }
     }
 
-    world[(uint8_t)ty][(uint8_t)tx] = BLOCK_AIR;
-    if (drop != ITEM_AIR) {
-        if (!add_item(drop)) {
-            set_msg("inventory full");
-        } else {
-            set_msg("block broken");
-        }
+    set_block((int8_t)hit.x, (int8_t)hit.y, (int8_t)hit.z, BLOCK_AIR);
+    if (drop != ITEM_AIR && !add_item(drop)) {
+        set_msg("inventory full");
     } else {
         set_msg("block broken");
     }
@@ -713,18 +830,14 @@ static void break_target(void)
 
 static void place_target(void)
 {
-    int8_t tx;
-    int8_t ty;
+    RayHit hit;
     uint8_t item;
     uint8_t block;
 
-    tx = (int8_t)player_x + target_dx;
-    ty = (int8_t)player_y + target_dy;
-    if (!in_bounds(tx, ty)) {
+    if (!center_ray(&hit)) {
         return;
     }
-    if (world[(uint8_t)ty][(uint8_t)tx] != BLOCK_AIR &&
-        world[(uint8_t)ty][(uint8_t)tx] != BLOCK_LEAVES) {
+    if (!in_bounds((int8_t)hit.prev_x, (int8_t)hit.prev_y, (int8_t)hit.prev_z)) {
         return;
     }
 
@@ -734,16 +847,18 @@ static void place_target(void)
         set_msg("not placeable");
         return;
     }
-    if (block == BLOCK_SAPLING) {
-        if ((uint8_t)ty + 1 >= WORLD_H ||
-            (world[(uint8_t)ty + 1][(uint8_t)tx] != BLOCK_DIRT &&
-             world[(uint8_t)ty + 1][(uint8_t)tx] != BLOCK_GRASS)) {
-            set_msg("needs dirt");
-            return;
-        }
+
+    if (get_block((int8_t)hit.prev_x, (int8_t)hit.prev_y, (int8_t)hit.prev_z) != BLOCK_AIR) {
+        return;
+    }
+    if (block == BLOCK_SAPLING &&
+        get_block((int8_t)hit.prev_x, (int8_t)(hit.prev_y - 1), (int8_t)hit.prev_z) != BLOCK_DIRT &&
+        get_block((int8_t)hit.prev_x, (int8_t)(hit.prev_y - 1), (int8_t)hit.prev_z) != BLOCK_GRASS) {
+        set_msg("needs dirt");
+        return;
     }
 
-    world[(uint8_t)ty][(uint8_t)tx] = block;
+    set_block((int8_t)hit.prev_x, (int8_t)hit.prev_y, (int8_t)hit.prev_z, block);
     if (block == BLOCK_LOG) {
         ++logs_in_world;
     }
@@ -774,35 +889,39 @@ static void handle_key(char key)
     switch (key) {
         case 'w':
         case 'W':
-            try_move(0, -1);
+            try_move(1, 0);
             break;
         case 's':
         case 'S':
-            try_move(0, 1);
+            try_move(-1, 0);
             break;
         case 'a':
         case 'A':
-            try_move(-1, 0);
+            yaw = (uint8_t)((yaw - 1) & 0x0f);
             break;
         case 'd':
         case 'D':
-            try_move(1, 0);
-            break;
-        case 'i':
-        case 'I':
-            set_target(0, -1);
-            break;
-        case 'k':
-        case 'K':
-            set_target(0, 1);
+            yaw = (uint8_t)((yaw + 1) & 0x0f);
             break;
         case 'j':
         case 'J':
-            set_target(-1, 0);
+            try_move(0, -1);
             break;
         case 'l':
         case 'L':
-            set_target(1, 0);
+            try_move(0, 1);
+            break;
+        case 'i':
+        case 'I':
+            if (pitch < 5) {
+                ++pitch;
+            }
+            break;
+        case 'k':
+        case 'K':
+            if (pitch > -5) {
+                --pitch;
+            }
             break;
         case ' ':
             break_target();
