@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define WORLD_X 16
+#define WORLD_X 32
 #define WORLD_Y 8
-#define WORLD_Z 16
+#define WORLD_Z 32
 #define SCREEN_W 30
 #define SCREEN_H 16
 #define INV_SLOTS 15
@@ -18,9 +18,20 @@
 #define PLAYER_CAM_HEIGHT 24
 #define BLOCK_SIZE 16
 
+#define SCREEN_RAM 0x0400
 //#define COLOR_RAM 0xd800
 #define BORDER_COLOR 0xd020
 #define BG_COLOR 0xd021
+
+#define SCR ((uint8_t*)SCREEN_RAM)
+#define COL ((uint8_t*)COLOR_RAM)
+#define SCREEN_SIZE 1000
+
+static const uint16_t screen_row[25] = {
+    0, 40, 80, 120, 160, 200, 240, 280, 320, 360,
+    400, 440, 480, 520, 560, 600, 640, 680, 720, 760,
+    800, 840, 880, 920, 960
+};
 
 enum BlockId {
     BLOCK_AIR = 0x0,
@@ -470,11 +481,70 @@ static uint8_t block_color(uint8_t block, uint8_t dist)
     return COLOR_BLACK;
 }
 
+static uint8_t screen_code(char ch)
+{
+    /* Convert a useful PETSCII/ASCII subset to C64 screen codes.
+       Lowercase is intentionally folded to uppercase: this keeps direct
+       screen RAM output readable without calling cc65's cputc converter. */
+    if (ch >= 'a' && ch <= 'z') {
+        return (uint8_t)(ch - 'a' + 1);
+    }
+    if (ch >= 'A' && ch <= 'Z') {
+        return (uint8_t)(ch - 'A' + 1);
+    }
+    if (ch == 102) {              /* cc65/PETSCII checker used for grass */
+        return 102;
+    }
+    return (uint8_t)ch;
+}
+
+static void __fastcall__ screen_put_at(uint8_t x, uint8_t y, char ch, uint8_t color)
+{
+    uint16_t pos = screen_row[y] + x;
+    SCR[pos] = screen_code(ch);
+    COL[pos] = color;
+}
+
+static void __fastcall__ screen_put_at_rev(uint8_t x, uint8_t y, char ch, uint8_t color)
+{
+    uint16_t pos = screen_row[y] + x;
+    SCR[pos] = (uint8_t)(screen_code(ch) | 0x80);
+    COL[pos] = color;
+}
+
+static void __fastcall__ screen_puts_at(uint8_t x, uint8_t y, const char *s, uint8_t color)
+{
+    uint16_t pos = screen_row[y] + x;
+    while (*s && pos < SCREEN_SIZE) {
+        SCR[pos] = screen_code(*s++);
+        COL[pos] = color;
+        ++pos;
+    }
+}
+
+static void __fastcall__ screen_fill_at(uint8_t x, uint8_t y, uint8_t len, char ch, uint8_t color)
+{
+    uint16_t pos = screen_row[y] + x;
+    uint8_t sc = screen_code(ch);
+    while (len--) {
+        SCR[pos] = sc;
+        COL[pos] = color;
+        ++pos;
+    }
+}
+
+static void screen_clear(void)
+{
+    uint16_t i;
+    for (i = 0; i < SCREEN_SIZE; ++i) {
+        SCR[i] = 32;
+        COL[i] = COLOR_WHITE;
+    }
+}
+
 static void put_colored(uint8_t x, uint8_t y, char ch, uint8_t color)
 {
-    gotoxy(x, y);
-    textcolor(color);
-    cputc(ch);
+    screen_put_at(x, y, ch, color);
 }
 
 static void raycast(uint8_t angle, int8_t ray_pitch, RayHit *hit)
@@ -567,9 +637,22 @@ static void draw_world(void)
         }
     }
 
-    revers(1);
-    put_colored(SCREEN_W / 2, SCREEN_H / 2, '+', COLOR_WHITE);
-    revers(0);
+    screen_put_at_rev(SCREEN_W / 2, SCREEN_H / 2, '+', COLOR_WHITE);
+}
+
+static void draw_item_line(uint8_t row, uint8_t slot, uint8_t item, uint8_t selected)
+{
+    uint16_t pos = screen_row[row] + 31;
+    uint8_t rev = selected ? 0x80 : 0;
+    uint8_t count = item_count(item);
+
+    SCR[pos]     = (uint8_t)(screen_code((char)('1' + slot)) | rev);
+    SCR[pos + 1] = (uint8_t)(screen_code(':') | rev);
+    SCR[pos + 2] = (uint8_t)(screen_code(item_name_initial[item >> 4]) | rev);
+    SCR[pos + 3] = (uint8_t)(screen_code((char)('0' + (count / 10))) | rev);
+    SCR[pos + 4] = (uint8_t)(screen_code((char)('0' + (count % 10))) | rev);
+
+    COL[pos] = COL[pos + 1] = COL[pos + 2] = COL[pos + 3] = COL[pos + 4] = COLOR_WHITE;
 }
 
 static void draw_hud(void)
@@ -577,39 +660,25 @@ static void draw_hud(void)
     uint8_t i;
     uint8_t item;
 
-    textcolor(COLOR_WHITE);
-    gotoxy(31, 0);
-    cputs("HP");
-    gotoxy(31, 1);
+    screen_puts_at(31, 0, "HP", COLOR_WHITE);
     for (i = 0; i < MAX_HEALTH; ++i) {
-        cputc(i < health ? 83 : 46);
+        screen_put_at((uint8_t)(31 + i), 1, i < health ? 83 : '.', COLOR_WHITE);
     }
 
-    gotoxy(31, 3);
-    cputs("HOTBAR");
+    screen_puts_at(31, 3, "HOTBAR", COLOR_WHITE);
     for (i = 0; i < HOTBAR_SLOTS; ++i) {
-        gotoxy(31, (uint8_t)(4 + i));
         item = inventory[i];
-        revers(i == selected_slot);
-        cprintf("%u:%c%02u", i + 1, item_name_initial[item >> 4], item_count(item));
-        revers(0);
+        draw_item_line((uint8_t)(4 + i), i, item, i == selected_slot);
     }
 
-    gotoxy(31, 11);
-    cputs("W/S");
-    gotoxy(31, 12);
-    cputs("A/D");
-    gotoxy(31, 13);
-    cputs("I/K");
-    gotoxy(31, 14);
-    cputs("SPC");
+    screen_puts_at(31, 11, "W/S", COLOR_WHITE);
+    screen_puts_at(31, 12, "A/D", COLOR_WHITE);
+    screen_puts_at(31, 13, "I/K", COLOR_WHITE);
+    screen_puts_at(31, 14, "SPC", COLOR_WHITE);
 
-    gotoxy(0, 22);
-    textcolor(COLOR_LIGHTBLUE);
-    cclear(40);
-    gotoxy(0, 22);
+    screen_fill_at(0, 22, 40, ' ', COLOR_LIGHTBLUE);
     if (message_timer) {
-        cputs(message);
+        screen_puts_at(0, 22, message, COLOR_LIGHTBLUE);
         --message_timer;
     }
 }
@@ -945,15 +1014,10 @@ static void handle_key(char key)
 
 static void setup_c64(void)
 {
-    uint16_t i;
-
     POKE(BORDER_COLOR, COLOR_BLACK);
     POKE(BG_COLOR, COLOR_BLACK);
-    clrscr();
     cursor(0);
-    for (i = 0; i < 1000; ++i) {
-        POKE(COLOR_RAM + i, COLOR_WHITE);
-    }
+    screen_clear();
 }
 
 int main(void)
@@ -981,9 +1045,8 @@ int main(void)
         }
     }
 
-    clrscr();
+    screen_clear();
     cursor(1);
-    textcolor(COLOR_WHITE);
-    cputs("minecraft c64 stopped\r\n");
+    screen_puts_at(0, 0, "MINECRAFT C64 STOPPED", COLOR_WHITE);
     return 0;
 }
