@@ -1,12 +1,11 @@
 #  blocks C64: C64 PETSCII Port
-
-blocks64k-inspired game for Commodore 64
+"main mine and block building game" -inspired for Commodore 64
 
 This is a Commodore 64 project that mirrors the gameplay structure of
-`../blocks64kInblocks64k.urcl` in a PETSCII-friendly form and uses the
+urcl port by sammyuri in a PETSCII-friendly form and uses the
 Kick-3D engine for rendering. The original project by:
 
-https://github.com/sammyuri/blocks64k
+https://github.com/sammyuri/minecraft
 
 It keeps the same core ideas:
 
