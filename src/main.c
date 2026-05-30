@@ -1047,6 +1047,6 @@ int main(void)
 
     screen_clear();
     cursor(1);
-    screen_puts_at(0, 0, "MINECRAFT C64 STOPPED", COLOR_WHITE);
+    screen_puts_at(0, 0, "BLOCKS64K C64 STOPPED", COLOR_WHITE);
     return 0;
 }

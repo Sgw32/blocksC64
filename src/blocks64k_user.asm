@@ -21,10 +21,10 @@
 main
 			jsr setup
 
-.loop		jsr minecraftInput
+.loop		jsr blocks64kInput
 			jsr limitPlayerPos
 			jsr getDirVect
-			jsr minecraftTick
+			jsr blocks64kTick
 			jsr rayScan
 			jsr drawScreen
 			jsr moveBackSpr
@@ -33,7 +33,7 @@ main
 			jmp .loop
 
 userEvents
-			jmp minecraftInput
+			jmp blocks64kInput
 
 !zone setup
 setup
@@ -85,8 +85,8 @@ setup
 			jsr drawHud
 			rts
 
-!zone minecraftInput
-minecraftInput
+!zone blocks64kInput
+blocks64kInput
 			jsr getKeyboard
 
 			; W forward, S backward, A/D turn, Q/E strafe.
@@ -345,8 +345,8 @@ eatSelected
 			inc mc.needHud
 .exit		rts
 
-!zone minecraftTick
-minecraftTick
+!zone blocks64kTick
+blocks64kTick
 			; Small random-tick placeholder matching the URCL frame hook.
 			; The mutable map is the source of truth for Kick-3D rendering.
 			rts

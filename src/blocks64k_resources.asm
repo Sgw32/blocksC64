@@ -1,5 +1,5 @@
 ; Kick-3D map cell values below 128 are empty/event cells.
-; Values 128 and above are solid Minecraft blocks for the Kick raycaster.
+; Values 128 and above are solid blocks64k blocks for the Kick raycaster.
 
 *=$2000	"Player sprite"
 		!byte $70,$00,$00,$f8,$00,$00,$f8,$00

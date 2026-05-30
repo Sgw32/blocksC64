@@ -1,0 +1,30 @@
+name: Build PRG
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build blocks64 PRG
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ACME assembler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y acme
+
+      - name: Build PRG
+        run: make
+
+      - name: Upload PRG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocks64-prg
+          path: blocks64.prg
+          if-no-files-found: error
