@@ -88,43 +88,43 @@ setup
 minecraftInput
 			jsr getKeyboard
 
-			; W forward, Z backward, A/D turn, C/E strafe, I/K look.
+			; W forward, S backward, A/D turn, Q/E strafe.
 			lda getKeyboard.scan+1
-			and #%00000010
+			and #%00000010 ; check W
 			beq .notW
 			jsr playerFWD
 .notW		lda getKeyboard.scan+1
-			and #%00010000
-			beq .notZ
+			and #%00100000 ; check S
+			beq .notS
 			jsr invertDirVect
 			jsr playerFWD
 			jsr invertDirVect
-.notZ		lda getKeyboard.scan+1
-			and #%00000100
+.notS		lda getKeyboard.scan+1
+			and #%00000100 ; check A
 			beq .notA
 			jsr playerROL
 .notA		lda getKeyboard.scan+2
-			and #%00000100
+			and #%00000100 ; check D
 			beq .notD
 			jsr playerROR
-.notD		lda getKeyboard.scan+2
-			and #%00010000
-			beq .notC
+.notD		lda getKeyboard.scan+7
+			and #%01000000 ; check Q
+			beq .notQ
 			jsr playerSTL
-.notC		lda getKeyboard.scan+1
-			and #%00100000
+.notQ		lda getKeyboard.scan+1
+			and #%01000000 ; check E
 			beq .notE
 			jsr playerSTR
 
 .notE		lda getKeyboard.scan+4
-			and #%00000010
+			and #%00000010 ; check up I
 			beq .notI
 			lda viewPitch
 			cmp #$fa
 			beq .notI
-			dec viewPitch
+			dec viewPitch ; pitch down on I
 .notI		lda getKeyboard.scan+4
-			and #%00010000
+			and #%00100000 ; check down K
 			beq .notK
 			lda viewPitch
 			cmp #6
@@ -132,16 +132,16 @@ minecraftInput
 			inc viewPitch
 
 .notK		lda getKeyboard.scan+4
-			and #%00100000
+			and #%01000000 ; check down O
 			beq .notO
 			jsr eatSelected
 
 .notO		lda getKeyboard.scan+7
-			and #%00010000
+			and #%00010000 ; check space
 			beq .notSpace
 			jsr breakTarget
 .notSpace	lda getKeyboard.scan+0
-			and #%00000010
+			and #%00000010 ; check return
 			beq .notReturn
 			jsr placeTarget
 .notReturn	jsr hotbarKeys

@@ -83,43 +83,43 @@ setup
 minecraftInput
 			jsr getKeyboard
 
-			; W forward, Z backward, A/D turn, C/E strafe, I/K look.
+			; W forward, S backward, A/D turn, Q/E strafe.
 			lda getKeyboard_scan+1
-			and #%00000010
+			and #%00000010 ; check W
 			beq minecraftInput_notW
 			jsr playerFWD
 minecraftInput_notW		lda getKeyboard_scan+1
-			and #%00010000
-			beq minecraftInput_notZ
+			and #%00100000 ; check S
+			beq minecraftInput_notS
 			jsr invertDirVect
 			jsr playerFWD
 			jsr invertDirVect
-minecraftInput_notZ		lda getKeyboard_scan+1
-			and #%00000100
+minecraftInput_notS		lda getKeyboard_scan+1
+			and #%00000100 ; check A
 			beq minecraftInput_notA
 			jsr playerROL
 minecraftInput_notA		lda getKeyboard_scan+2
-			and #%00000100
+			and #%00000100 ; check D
 			beq minecraftInput_notD
 			jsr playerROR
-minecraftInput_notD		lda getKeyboard_scan+2
-			and #%00010000
-			beq minecraftInput_notC
+minecraftInput_notD		lda getKeyboard_scan+7
+			and #%01000000 ; check Q
+			beq minecraftInput_notQ
 			jsr playerSTL
-minecraftInput_notC		lda getKeyboard_scan+1
-			and #%00100000
+minecraftInput_notQ		lda getKeyboard_scan+1
+			and #%01000000 ; check E
 			beq minecraftInput_notE
 			jsr playerSTR
 
 minecraftInput_notE		lda getKeyboard_scan+4
-			and #%00000010
+			and #%00000010 ; check up I
 			beq minecraftInput_notI
 			lda viewPitch
 			cmp #$fa
 			beq minecraftInput_notI
-			dec viewPitch
+			dec viewPitch ; pitch down on I
 minecraftInput_notI		lda getKeyboard_scan+4
-			and #%00010000
+			and #%00100000 ; check down K
 			beq minecraftInput_notK
 			lda viewPitch
 			cmp #6
@@ -127,16 +127,16 @@ minecraftInput_notI		lda getKeyboard_scan+4
 			inc viewPitch
 
 minecraftInput_notK		lda getKeyboard_scan+4
-			and #%00100000
+			and #%01000000 ; check down O
 			beq minecraftInput_notO
 			jsr eatSelected
 
 minecraftInput_notO		lda getKeyboard_scan+7
-			and #%00010000
+			and #%00010000 ; check space
 			beq minecraftInput_notSpace
 			jsr breakTarget
 minecraftInput_notSpace	lda getKeyboard_scan+0
-			and #%00000010
+			and #%00000010 ; check return
 			beq minecraftInput_notReturn
 			jsr placeTarget
 minecraftInput_notReturn	jsr hotbarKeys
