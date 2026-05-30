@@ -1,8 +1,12 @@
-# Minecraft in Minecraft: C64 PETSCII Port
+#  blocks C64: C64 PETSCII Port
+
+Minecraft-inspired game for Commodore 64
 
 This is a Commodore 64 project that mirrors the gameplay structure of
 `../MinecraftInMinecraft.urcl` in a PETSCII-friendly form and uses the
-Kick-3D engine for rendering.
+Kick-3D engine for rendering. The original project by:
+
+https://github.com/sammyuri/minecraft
 
 It keeps the same core ideas:
 
