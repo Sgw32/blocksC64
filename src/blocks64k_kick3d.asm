@@ -1,4 +1,4 @@
-; Minecraft C64 port using the Kick-3D rendering path.
+; blocks64k C64 port using the Kick-3D rendering path.
 ; The ray scanner, ray caster, wall drawing routine, PETSCII column renderer,
 ; math tables, sprites, and raster split are sourced from Kick-3D unchanged.
 
@@ -25,10 +25,10 @@
 !set MC_FURNACE	= $8e
 !set MC_CHEST	= $8f
 
-!source "minecraft_user.asm"
+!source "blocks64k_user.asm"
 !source "../Kick-3D/display.asm"
 !source "../Kick-3D/sprites.asm"
 !source "../Kick-3D/raycast.asm"
 !source "../Kick-3D/rayscan.asm"
 !source "../Kick-3D/interrupts.asm"
-!source "minecraft_resources.asm"
+!source "blocks64k_resources.asm"
