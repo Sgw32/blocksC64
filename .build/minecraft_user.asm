@@ -26,6 +26,7 @@ main_loop		jsr minecraftInput
 			jsr drawScreen
 			jsr moveBackSpr
 			jsr drawHud
+			;jsr drawCursor
 			jmp main_loop
 
 userEvents
@@ -338,12 +339,12 @@ minecraftTick
 			rts
 
 drawHud
+			lda #0
 			lda mc_needHud
 			bne drawHud_draw
 			rts
 drawHud_draw		lda #0
 			sta mc_needHud
-
 			ldx #0
 drawHud_hpLoop		lda #$20
 			cpx mc_health
@@ -369,6 +370,14 @@ drawHud_slotColor	sta COLOR_RAM+24*40+10,x
 			cpx #5
 			bcc drawHud_slotLoop
 			rts
+
+; !zone drawCursor
+; drawCursor
+; 			lda #'+'
+; 			sta SCREEN_RAM+12*40+20
+; 			lda #WHITE
+; 			sta COLOR_RAM+12*40+20
+; 			rts
 
 itemGlyph
 			cmp #0
