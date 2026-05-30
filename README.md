@@ -1,7 +1,8 @@
 # Minecraft in Minecraft: C64 PETSCII Port
 
-This is a cc65 Commodore 64 project that mirrors the gameplay structure of
-`../MinecraftInMinecraft.urcl` in a PETSCII-friendly form.
+This is a Commodore 64 project that mirrors the gameplay structure of
+`../MinecraftInMinecraft.urcl` in a PETSCII-friendly form and uses the
+Kick-3D engine for rendering.
 
 It keeps the same core ideas:
 
@@ -12,14 +13,15 @@ It keeps the same core ideas:
 - grass spreading, grass decay, sapling growth, and leaf decay
 - player health, apples, and a compact hotbar HUD
 
-The C64 version renders a first-person PETSCII view by casting rays into a
-compact 16x8x16 voxel world. The center ray is also used for breaking and
-placing blocks, matching the original script's "previous block/current block"
-raycast behavior.
+The source entry point is `src/minecraft_kick3d.asm`. The Makefile generates
+an ACME-compatible build copy in `.build/` before assembling it. It sources Kick-3D's
+ray scanner, ray caster, PETSCII column renderer, math tables, sprites, and
+raster split, then maps Minecraft-style blocks/items onto Kick-3D's 40x25
+solid-cell map format. The center ray is used for breaking and placing blocks.
 
 ## Build
 
-Install cc65, then run:
+Install ACME, then run:
 
 ```sh
 make
@@ -37,14 +39,24 @@ Optional emulator launch target:
 make run
 ```
 
+To build the original Kick-3D engine without the Minecraft logic:
+
+```sh
+make kick3d
+```
+
+That writes:
+
+```text
+kick3d_plain.prg
+```
+
 ## Controls
 
 - `W` / `S`: move forward and backward
 - `A` / `D`: turn left and right
-- `J` / `L`: strafe left and right
-- `I` / `K`: look up and down
+- `Q` / `E`: strafe left and right
 - `Space`: break targeted block
 - `Return`: place selected hotbar item
 - `1` to `5`: select hotbar slot
-- `E`: eat apple from selected slot
-- `Q`: quit
+- `O`: eat apple from selected slot
