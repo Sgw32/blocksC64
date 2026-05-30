@@ -53,9 +53,11 @@ kick3d_plain.prg
 
 ## Controls
 
-- `W` / `S`: move forward and backward
+- `W`: move forward
 - `A` / `D`: turn left and right
-- `Q` / `E`: strafe left and right
+- `Z`: move backward
+- `C` / `E`: strafe left and right
+- `I` / `K`: look up and down
 - `Space`: break targeted block
 - `Return`: place selected hotbar item
 - `1` to `5`: select hotbar slot
